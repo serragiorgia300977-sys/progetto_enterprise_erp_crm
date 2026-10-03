@@ -1,0 +1,43 @@
+# Welcome to your new notebook
+# Type here in the cell editor to add code!
+from pyspark.sql.functions import col, coalesce, current_timestamp, lit
+
+# --- SILVER LAYER: Pulizia e Unificazione Clienti CRM + ERP ---
+df_crm_acc = spark.read.table("crm_accounts")
+df_erp_cust = spark.read.table("erp_customers")
+
+# Matching anagrafico tra CRM (BCCustomerCrossID) ed ERP (CustomerNo)
+df_silver_dim_customer = df_crm_acc.join(
+    df_erp_cust,
+    df_crm_acc["BCCustomerCrossID"] == df_erp_cust["CustomerNo"],
+    "full_outer",
+).select(
+    coalesce(col("BCCustomerCrossID"), col("CustomerNo")).alias("CustomerKey"),
+    coalesce(col("AccountName"), col("CustomerName")).alias("CustomerName"),
+    col("CustomerSegment"),
+    col("City"),
+    col("VATRegistrationNo"),
+    col("PaymentTermsDays"),
+)
+
+df_silver_dim_customer.write.format("delta").mode("overwrite").saveAsTable(
+    "dim_customer_gold"
+)
+
+# --- GOLD LAYER: Tabelle Fatti (Opportunities CRM & Sales ERP) ---
+df_crm_opps = spark.read.table("crm_opportunities")
+df_erp_sales = spark.read.table("erp_sales_orders")
+
+# Fatti Opportunità CRM
+df_crm_opps.withColumn("IngestionDate", current_timestamp()).write.format(
+    "delta"
+).mode("overwrite").saveAsTable("fact_opportunities_gold")
+
+# Fatti Ordini ERP
+df_erp_sales.withColumn("IngestionDate", current_timestamp()).write.format(
+    "delta"
+).mode("overwrite").saveAsTable("fact_sales_gold")
+
+print(
+    "🚀 Trasformazione Silver e Gold completata! Create: dim_customer_gold, fact_opportunities_gold, fact_sales_gold"
+)
